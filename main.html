@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>Lied-Konverter</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; background: #f0f2f5; padding: 20px; }
+        .app-container { max-width: 950px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        textarea { width: 100%; height: 120px; font-family: monospace; margin-bottom: 10px; padding: 10px; border: 1px solid #ccc; border-radius: 4px; }
+        
+        #pdf-page { 
+            background: white; width: 210mm; height: 297mm; padding: 15mm; margin: auto; 
+            border: 1px solid #ddd; box-sizing: border-box; overflow: hidden; 
+        }
+
+        #content-wrapper { width: 100%; line-height: 1.1; }
+        
+        /* Fester Abstand durch Block-Eigenschaft */
+        .stanza { display: block; width: 100%; margin: 0; padding: 0; }
+        .spacer { height: 25px; width: 100%; display: block; } /* Echter Platzhalter */
+
+        .line-container { white-space: pre; display: block; margin: 0; }
+        .chord-line { font-weight: bold; color: #000; display: block; margin-top: 4px; }
+        .text-line { display: block; margin-bottom: 2px; }
+        .refrain-text { font-weight: bold; }
+
+        .controls { display: flex; flex-wrap: wrap; gap: 15px; justify-content: center; align-items: center; margin-bottom: 20px; background: #e9ecef; padding: 15px; border-radius: 6px; }
+        button { padding: 10px 20px; cursor: pointer; border: none; border-radius: 4px; font-weight: bold; }
+        .btn-primary { background: #007bff; color: white; }
+        .btn-success { background: #28a745; color: white; margin-left: 10px; }
+    </style>
+</head>
+<body>
+
+<div class="app-container">
+    <h2 style="text-align: center;">Lied-Konverter Pro</h2>
+    <textarea id="inputText" placeholder="Text hier einfügen..."></textarea>
+    
+    <div class="controls">
+        <select id="transposeSelect" onchange="processAndFit()">
+            <option value="-6">-6</option><option value="-5">-5</option><option value="-4">-4</option>
+            <option value="-3">-3</option><option value="-2">-2</option><option value="-1">-1</option>
+            <option value="0" selected>Original</option>
+            <option value="1">+1</option><option value="2">+2</option><option value="3">+3</option>
+            <option value="4">+4</option><option value="5">+5</option><option value="6">+6</option>
+        </select>
+        <button class="btn-primary" onclick="processAndFit()">Vorschau aktualisieren</button>
+        <button class="btn-success" onclick="savePDF()">PDF speichern</button>
+    </div>
+
+    <div id="pdf-page"><div id="content-wrapper"></div></div>
+</div>
+
+<script>
+    const translitRules = {'а':'a','б':'b','в':'w','г':'g','д':'d','е':'e','ё':'jo','ж':'sch','з':'s','и':'i','й':'j','к':'k','л':'l','м':'m','н':'n','о':'o','п':'p','р':'r','с':'s','т':'t','у':'u','ф':'f','х':'ch','ц':'z','ч':'tsch','ш':'sch','щ':'sch','ы':'i','э':'e','ю':'ju','я':'ja','ь':'','ъ':'','А':'A','Б':'B','В':'W','Г':'G','Д':'D','Е':'E','Ё':'Jo','Ж':'Sch','З':'S','И':'I','Й':'J','К':'K','Л':'L','M':'M','Н':'N','О':'O','П':'P','Р':'R','С':'S','Т':'T','У':'U','Ф':'F','Х':'Ch','Ц':'Z','Ч':'Tsch','Ш':'Sch','Щ':'Schtsch','Ы':'Y','Э':'E','Ю':'Ju','Я':'Ja'};
+    const scale = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+
+    function transposeChord(chord, steps) {
+        if (steps === 0) return chord;
+        return chord.replace(/[A-H][#b]?/g, m => {
+            let root = m;
+            if (root === 'H') root = 'B';
+            if (root === 'Hb') root = 'A#';
+            let normalized = root.replace('Db','C#').replace('Eb','D#').replace('Gb','F#').replace('Ab','G#').replace('Bb','A#');
+            let idx = scale.indexOf(normalized);
+            if (idx === -1) return m;
+            let newIdx = (idx + steps + 12) % 12;
+            let res = scale[newIdx];
+            if (res === 'B') res = 'H';
+            if (res === 'A#') res = 'B';
+            return res;
+        });
+    }
+
+    function isChords(line) {
+        const t = line.trim();
+        if (!t) return false;
+        // Wenn die Zeile | enthält oder fast nur aus Akkordbuchstaben besteht
+        return (/[A-H]/.test(t) && !/[а-яА-Я]{3,}/.test(t)) || t.includes('|');
+    }
+
+    function processAndFit() {
+        const input = document.getElementById('inputText').value;
+        const wrapper = document.getElementById('content-wrapper');
+        const steps = parseInt(document.getElementById('transposeSelect').value);
+        wrapper.innerHTML = '';
+        
+        const lines = input.split('\n');
+        let currentStanza = document.createElement('div');
+        currentStanza.className = 'stanza';
+        let isRefrain = false;
+
+        for (let i = 0; i < lines.length; i++) {
+            let line = lines[i];
+            let lt = line.trim().toLowerCase();
+
+            // Ende-Filter
+            if (lt.includes("____") || lt.includes("http") || lt.includes("artist:") || lt === "русавуки") break;
+
+            const isMarker = lt.includes("zwischenspiel") || lt.includes("intro") || lt.includes("проигрыш") || lt.includes("интро");
+            const isRefrainMarker = lt.includes("припев") || lt.includes("refrain");
+
+            // NEUER ABSCHNITT
+            if (!lt || isMarker || isRefrainMarker) {
+                if (currentStanza.childNodes.length > 0) {
+                    wrapper.appendChild(currentStanza);
+                    let spacer = document.createElement('div');
+                    spacer.className = 'spacer';
+                    wrapper.appendChild(spacer); // Echter Abstandshalter
+                    
+                    currentStanza = document.createElement('div');
+                    currentStanza.className = 'stanza';
+                }
+                if (isRefrainMarker) isRefrain = true;
+                if (!lt || isRefrainMarker) continue;
+            }
+
+            if (isMarker) { 
+                line = lt.includes("intro") ? "Intro:" : "Zwischenspiel:";
+                isRefrain = false;
+            }
+
+            const div = document.createElement('div');
+            div.className = 'line-container';
+
+            if (isChords(line)) {
+                const s = document.createElement('span');
+                s.className = 'chord-line';
+                s.innerHTML = transposeChord(line, steps).replace(/ /g, '&nbsp;');
+                div.appendChild(s);
+            } else {
+                const s = document.createElement('span');
+    s.className = 'text-line' + (isRefrain ? ' refrain-text' : '');
+    
+    // HIER: Zuerst ь und ъ komplett löschen
+    let cleanLine = line.replace(/[ьъЬЪ]/g, ''); 
+    
+    // Dann erst die restlichen Buchstaben umwandeln
+    s.innerText = cleanLine.split('').map(c => translitRules[c] || c).join('');
+    div.appendChild(s);
+    lastWasText = true;
+            }
+            currentStanza.appendChild(div);
+        }
+        wrapper.appendChild(currentStanza);
+
+        // Autofit Logik
+        let fs = 20;
+        wrapper.style.fontSize = fs + "px";
+        const maxH = 960; 
+        while (wrapper.scrollHeight > maxH && fs > 8) {
+            fs -= 0.5;
+            wrapper.style.fontSize = fs + "px";
+        }
+    }
+
+    async function savePDF() {
+        const element = document.getElementById('pdf-page');
+        const canvas = await html2canvas(element, { scale: 2 });
+        const pdf = new jspdf.jsPDF('p', 'mm', 'a4');
+        pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, 210, 297);
+        pdf.save("Lied_Transponiert.pdf");
+    }
+</script>
+</body>
+</html>
