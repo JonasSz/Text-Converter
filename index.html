@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
     <meta charset="UTF-8">
-    <title>Lied-Konverter Pro</title>
+    <title>Lied-Konverter Pro (Editierbar)</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <style>
@@ -20,8 +20,10 @@
         .stanza { display: block; width: 100%; margin: 0; padding: 0; }
         .spacer { height: 25px; width: 100%; display: block; }
 
-        .line-container { white-space: pre; display: block; margin: 0; }
-        .chord-line { font-weight: bold; color: #000; display: block; margin-top: 4px; font-family: 'Arial', monospace; }
+        .line-container { white-space: pre; display: block; margin: 0; outline: none; border: 1px solid transparent; }
+        .line-container:focus { background: #f9f9f9; border: 1px dotted #ccc; }
+
+        .chord-line { font-weight: bold; color: #000; display: block; margin-top: 4px; font-family: 'Arial', sans-serif; }
         .text-line { display: block; margin-bottom: 2px; font-family: Arial, sans-serif; }
         .refrain-text { font-weight: bold; }
 
@@ -29,12 +31,14 @@
         button { padding: 10px 20px; cursor: pointer; border: none; border-radius: 4px; font-weight: bold; }
         .btn-primary { background: #007bff; color: white; }
         .btn-success { background: #28a745; color: white; margin-left: 10px; }
+        .hint { font-size: 0.85em; color: #555; text-align: center; margin-bottom: 10px; }
     </style>
 </head>
 <body>
 
 <div class="app-container">
     <h2 style="text-align: center;">Lied-Konverter Pro</h2>
+    <p class="hint">Tipp: Du kannst nach der Vorschau direkt in den Text unten klicken, um Zeilen manuell anzupassen!</p>
     <textarea id="inputText" placeholder="Text hier einfügen..."></textarea>
     
     <div class="controls">
@@ -53,32 +57,12 @@
 </div>
 
 <script>
-    // 1. Zuerst: Nur die wirklich falschen Zeichen im russischen Original korrigieren
-    function cleanMixedScript(text) {
-        const replacements = {
-            'X': 'Х', 'x': 'х', // Lateinisches X zu russischem Х (Che)
-            'c': 'с', 'C': 'С', // Lateinisches c zu russischem с (Es)
-            'y': 'у', 'Y': 'У', // Lateinisches y zu russischem у (U)
-            'p': 'р', 'P': 'Р', // Lateinisches p zu russischem р (Er)
-            'a': 'а', 'o': 'о'  // (Falls diese lateinisch gemischt wurden)
-        };
-        
-        return text.split('').map(char => replacements[char] || char).join('');
-    }
+    // Deine spezifischen Translit-Regeln
+    const translitRules = {
+        'а':'a','б':'b','в':'w','г':'g','д':'d','е':'e','ё':'jo','ж':'sch','з':'s','и':'i','й':'j','к':'k','л':'l','м':'m','н':'n','о':'o','п':'p','р':'r','с':'s','т':'t','у':'u','ф':'f','х':'ch','ц':'z','ч':'tsch','ш':'sch','щ':'sch','ы':'i','э':'e','ю':'ju','я':'ja','ь':'','ъ':'',
+        'А':'A','Б':'B','В':'W','Г':'G','Д':'D','Е':'E','Ё':'Jo','Ж':'Sch','З':'S','И':'I','Й':'J','К':'K','Л':'L','M':'M','Н':'N','О':'O','П':'P','Р':'R','С':'S','Т':'T','У':'U','Ф':'F','Х':'Ch','Ц':'Z','Ч':'Tsch','Ш':'Sch','Щ':'Sch','Ы':'I','Э':'E','Ю':'Ju','Я':'Ja'
+    };
 
-    // 2. Danach: Die saubere russische Zeile ins Lateinische übertragen
-    function convertLine(text) {
-        // Erst Fake-Buchstaben zu echtem Russisch machen
-        let cleanRussian = cleanMixedScript(text);
-        
-        // Dann ь/ъ entfernen
-        let noSoftSigns = cleanRussian.replace(/[ьъЬЪ]/g, '');
-        
-        // Dann erst die Transliteration laut Tabelle
-        return noSoftSigns.split('').map(c => translitRules[c] || c).join('');
-    }
-    // Vollständige Tabelle inkl. v, r, l, u
-        const translitRules = {'а':'a','б':'b','в':'w','г':'g','д':'d','е':'e','ё':'jo','ж':'sch','з':'s','и':'i','й':'j','к':'k','л':'l','м':'m','н':'n','о':'o','п':'p','р':'r','с':'s','т':'t','у':'u','ф':'f','х':'ch','ц':'z','ч':'tsch','ш':'sch','щ':'sch','ы':'i','э':'e','ю':'ju','я':'ja','ь':'','ъ':'','А':'A','Б':'B','В':'W','Г':'G','Д':'D','Е':'E','Ё':'Jo','Ж':'Sch','З':'S','И':'I','Й':'J','К':'K','Л':'L','M':'M','Н':'N','О':'O','П':'P','Р':'R','С':'S','Т':'T','У':'U','Ф':'F','Х':'Ch','Ц':'Z','Ч':'Tsch','Ш':'Sch','Щ':'Sch','Ы':'I','Э':'E','Ю':'Ju','Я':'Ja'};
     const scale = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
     function transposeChord(chord, steps) {
@@ -99,24 +83,22 @@
     function isChords(line) {
         const t = line.trim();
         if (!t) return false;
-        // Zähle kyrillische Zeichen
-        const cyrillicMatch = t.match(/[а-яА-ЯёЁ]/g);
-        const cyrillicCount = cyrillicMatch ? cyrillicMatch.length : 0;
-        
-        // Wenn mehr als 2 russische Buchstaben da sind, ist es DEFINITIV Text
+        const cyrillicCount = (t.match(/[а-яА-ЯёЁ]/g) || []).length;
         if (cyrillicCount > 2) return false;
-        
-        // Prüfe auf typische Akkord-Strukturen (A, B, C... oder Taktstriche)
-        // Wir schließen aus, dass Wörter wie "Ja" oder "I" (russisch) als Akkorde zählen
         const words = t.split(/\s+/);
-        const looksLikeChords = words.every(w => 
-            /^[A-H][b#]?(m|maj|min|dim|aug|sus|add)?\d?(\/[A-G][b#]?)?$/.test(w) || w === "|" || w === "/" || w === ""
-        );
-
-        return looksLikeChords;
+        return words.every(w => /^[A-H][b#]?(m|maj|min|dim|aug|sus|add)?\d?(\/[A-G][b#]?)?$/.test(w) || w === "|" || w === "/" || w === "");
     }
-// Diese Funktion korrigiert lateinische Zeichen, die fälschlicherweise in russischen Wörtern stecken
- 
+
+    function cleanMixedScript(text) {
+        const replacements = { 'X': 'Х', 'x': 'х', 'c': 'с', 'C': 'С', 'y': 'у', 'Y': 'У', 'p': 'р', 'P': 'Р', 'a': 'а', 'o': 'о' };
+        return text.split('').map(char => replacements[char] || char).join('');
+    }
+
+    function convertLine(text) {
+        let cleanText = cleanMixedScript(text);
+        let noSoftSigns = cleanText.replace(/[ьъЬЪ]/g, '');
+        return noSoftSigns.split('').map(c => translitRules[c] || c).join('');
+    }
 
     function processAndFit() {
         const input = document.getElementById('inputText').value;
@@ -133,18 +115,15 @@
             let line = lines[i];
             let lt = line.trim().toLowerCase();
 
-            // Footer-Filter
-            if (lt.includes("____") || lt.includes("http") || lt.includes("artist:") || lt.includes("песнь возрождения")) break;
+            if (lt.includes("____") || lt.includes("http") || lt.includes("artist:")) break;
 
             const isRefrainMarker = lt.includes("припев") || lt.includes("refrain");
-            const isVerseMarker = lt.includes("куплет") || lt.includes("kuplet") || /^\d\s*куплет/.test(lt) || /^\d\./.test(lt);
+            const isVerseMarker = lt.includes("куплет") || lt.includes("kuplet") || /^\d/.test(lt);
 
             if (!lt || isRefrainMarker || isVerseMarker) {
                 if (currentStanza.childNodes.length > 0) {
                     wrapper.appendChild(currentStanza);
-                    let spacer = document.createElement('div');
-                    spacer.className = 'spacer';
-                    wrapper.appendChild(spacer);
+                    wrapper.appendChild(document.createElement('div')).className = 'spacer';
                     currentStanza = document.createElement('div');
                     currentStanza.className = 'stanza';
                 }
@@ -155,25 +134,21 @@
 
             const div = document.createElement('div');
             div.className = 'line-container';
+            div.contentEditable = "true"; // Macht die Zeile klickbar und bearbeitbar
+            div.spellcheck = false;
 
             if (isChords(line)) {
-                const s = document.createElement('span');
-                s.className = 'chord-line';
-                // Akkorde transponieren, aber Buchstaben darin NICHT transliterieren
-                s.innerHTML = transposeChord(line, steps).replace(/ /g, '&nbsp;');
-                div.appendChild(s);
+                div.classList.add('chord-line');
+                div.innerHTML = transposeChord(line, steps).replace(/ /g, '&nbsp;');
             } else {
-                const s = document.createElement('span');
-                s.className = 'text-line' + (isRefrain ? ' refrain-text' : '');
-                // Textzeilen komplett transliterieren
-                s.innerText = convertLine(line);
-                div.appendChild(s);
+                div.classList.add('text-line');
+                if (isRefrain) div.classList.add('refrain-text');
+                div.innerText = convertLine(line);
             }
             currentStanza.appendChild(div);
         }
         wrapper.appendChild(currentStanza);
 
-        // Schriftgröße anpassen
         let fs = 20;
         wrapper.style.fontSize = fs + "px";
         while (wrapper.scrollHeight > 960 && fs > 8) {
@@ -187,7 +162,7 @@
         const canvas = await html2canvas(element, { scale: 2 });
         const pdf = new jspdf.jsPDF('p', 'mm', 'a4');
         pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, 210, 297);
-        pdf.save("Lied_Arial.pdf");
+        pdf.save("Lied_Export.pdf");
     }
 </script>
 </body>
